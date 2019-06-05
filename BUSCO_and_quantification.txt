@@ -1,0 +1,46 @@
+#!/bin/bash
+#SBATCH --job-name="busco_quant"
+#SBATCH --output=busco_quant_log.txt
+#SBATCH --cpus-per-task=24
+#SBATCH --open-mode=append
+#SBATCH --partition=macmanes,shared
+# echo commands to stdout
+set -x
+
+DIR=$(pwd)
+TRANSCRIPTOME=$"Oophaga_pumilio_assembly.fasta"
+BUSCO=$(which run_BUSCO.py)
+
+
+source activate orp_v2
+
+# move transcriptome into the correct location
+cp $DIR/assemblies/new_combined.ORP.fasta $DIR
+
+# rename
+mv new_combined.ORP.fasta $TRANSCRIPTOME
+
+### BUSCO on tetrapoda database ###
+python $BUSCO -i ${DIR}/${TRANSCRIPTOME} -o pumilio_tetrapoda -l /mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/busco_dbs/tetrapoda_odb9/ -m transcriptome -c 24
+
+
+### Salmon quantification ###
+# list samples
+samples=$(ls raw_data/*R1_001.fastq.gz | sed "s/1_001.fastq.gz//g" | grep -v Undetermined)
+
+# do quantification
+for sample in $samples
+do
+/mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/quant.mk all \
+MEM=500 CPU=24 \
+SAMPLE=$sample \
+SUFFIX=._001.fastq.gz \
+TRANSCRIPTOME=$TRANSCRIPTOME
+done
+
+# what is the mapping rate?
+for sample in $samples
+do
+rate=$(grep "Mapping rate" ${DIR}/quants/raw_data/${sample}/logs/salmon_quant.log | cut -d "=" -f 2 | sed "s/\s//g")
+printf '%s \t %s \n' "$sample" "$rate" >> $DIR/quants/mappingrates.txt
+done
