@@ -1,0 +1,34 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH --job-name="pumilio_assembly"
+#SBATCH --output=pumilioassemblylog.txt
+#SBATCH --open-mode=append
+# echo commands to stdout
+set -x
+
+
+DIR=$(pwd)
+
+# concatenate randomly chosen individuals, forward reads
+cd raw_data/
+zcat GS26_2_D_S478_L007_R1_001.fastq.gz GS26_2_V_S479_L007_R1_001.fastq.gz GS37_2_D_S440_L007_R1_001.fastq.gz GS37_2_V_S456_L007_R1_001.fastq.gz GS42_1_D_S430_L007_R1_001.fastq.gz GS42_1_V_S427_L007_R1_001.fastq.gz GS46_3_D_S449_L007_R1_001.fastq.gz GS46_3_V_S435_L007_R1_001.fastq.gz AD_4_D2_S444_L007_R1_001.fastq.gz AD_4_V2_S434_L007_R1_001.fastq.gz > pumilio4assembly.R1.fastq
+
+# concatenate randomly chosen individuals, forward reads
+zcat GS26_2_D_S478_L007_R2_001.fastq.gz GS26_2_V_S479_L007_R2_001.fastq.gz GS37_2_D_S440_L007_R2_001.fastq.gz GS37_2_V_S456_L007_R2_001.fastq.gz GS42_1_D_S430_L007_R2_001.fastq.gz GS42_1_V_S427_L007_R2_001.fastq.gz GS46_3_D_S449_L007_R2_001.fastq.gz GS46_3_V_S435_L007_R2_001.fastq.gz AD_4_D2_S444_L007_R2_001.fastq.gz AD_4_V2_S434_L007_R2_001.fastq.gz > pumilio4assembly.R2.fastq
+
+# move these reads for the assembly
+cd $DIR
+cp $DIR/raw_data/pumilio4assembly.R1.fastq $DIR/
+cp $DIR/raw_data/pumilio4assembly.R2.fastq $DIR/
+
+# transcriptome assembly
+source activate orp_v2
+
+/mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/oyster.mk main \
+MEM=120 \
+CPU=24 \
+READ1=pumilio4assembly.R1.fastq \
+READ2=pumilio4assembly.R2.fastq \
+TPM_FILT=1 \
+RUNOUT=O.pumilio
+
