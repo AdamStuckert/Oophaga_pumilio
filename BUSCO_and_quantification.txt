@@ -41,6 +41,6 @@ done
 # what is the mapping rate?
 for sample in $samples
 do
-rate=$(grep "Mapping rate" ${DIR}/quants/raw_data/${sample}/logs/salmon_quant.log | cut -d "=" -f 2 | sed "s/\s//g")
+rate=$(grep "Mapping rate" ${DIR}/quants/${sample}/logs/salmon_quant.log | cut -d "=" -f 2 | sed "s/\s//g")
 printf '%s \t %s \n' "$sample" "$rate" >> ${DIR}/quants/mappingrates.txt
 done
