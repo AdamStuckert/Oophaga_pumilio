@@ -7,18 +7,21 @@
 # echo commands to stdout
 set -x
 
+# activate OPR environment
+source activate orp_v2
+
+# global variables
 DIR=$(pwd)
 TRANSCRIPTOME=$"O.pumilio.ORP.fasta"
 BUSCO=$(which run_BUSCO.py)
 TETRAPODA="/mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/busco_dbs/tetrapoda_odb9/"
 
-source activate orp_v2
 
 # move transcriptome into the correct location
 cp ${DIR}/assemblies/${TRANSCRIPTOME} $DIR
 
 ### BUSCO on tetrapoda database ###
-python $BUSCO -i ${DIR}/${TRANSCRIPTOME} -o pumilio_tetrapoda -l $TETRAPODA -m transcriptome -c 24
+python ${BUSCO} -i ${DIR}/${TRANSCRIPTOME} -o pumilio_tetrapoda -l $TETRAPODA -m transcriptome -c 24
 
 
 ### Salmon quantification ###
@@ -31,7 +34,7 @@ do
 /mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/quant.mk all \
 MEM=500 CPU=24 \
 SAMPLE=$sample \
-SUFFIX=._001.fastq.gz \
+SUFFIX=_001.fastq.gz \
 TRANSCRIPTOME=$TRANSCRIPTOME
 done
 
