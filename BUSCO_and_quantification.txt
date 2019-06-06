@@ -8,20 +8,17 @@
 set -x
 
 DIR=$(pwd)
-TRANSCRIPTOME=$"Oophaga_pumilio_assembly.fasta"
+TRANSCRIPTOME=$"O.pumilio.ORP.fasta"
 BUSCO=$(which run_BUSCO.py)
-
+TETRAPODA="/mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/busco_dbs/tetrapoda_odb9/"
 
 source activate orp_v2
 
 # move transcriptome into the correct location
-cp $DIR/assemblies/new_combined.ORP.fasta $DIR
-
-# rename
-mv new_combined.ORP.fasta $TRANSCRIPTOME
+cp ${DIR}/assemblies/${TRANSCRIPTOME} $DIR
 
 ### BUSCO on tetrapoda database ###
-python $BUSCO -i ${DIR}/${TRANSCRIPTOME} -o pumilio_tetrapoda -l /mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/busco_dbs/tetrapoda_odb9/ -m transcriptome -c 24
+python $BUSCO -i ${DIR}/${TRANSCRIPTOME} -o pumilio_tetrapoda -l $TETRAPODA -m transcriptome -c 24
 
 
 ### Salmon quantification ###
@@ -42,5 +39,5 @@ done
 for sample in $samples
 do
 rate=$(grep "Mapping rate" ${DIR}/quants/raw_data/${sample}/logs/salmon_quant.log | cut -d "=" -f 2 | sed "s/\s//g")
-printf '%s \t %s \n' "$sample" "$rate" >> $DIR/quants/mappingrates.txt
+printf '%s \t %s \n' "$sample" "$rate" >> ${DIR}/quants/mappingrates.txt
 done
