@@ -1,0 +1,13 @@
+#!/bin/bash
+#SBATCH --job-name=annotate
+#SBATCH --output=annotate.log
+#SBATCH --cpus-per-task=24
+#SBATCH --partition=macmanes,shared
+
+source activate orp_v2
+
+diamond blastx -p 24 -e 1e-8 --top 0.1 -q O.pumilio.ORP.fasta -d /mnt/lustre/macmaneslab/ams1236/Oyster_River_Protocol/software/diamond/swissprot -o pumilio.all.annotation.hits.txt
+
+sort pumilio.all.annotation.hits.txt -k 1,1 -k11,11g | sort -u -k 1,1 --merge > pumilio.annotation.txt
+sed "s/|/\t/g" pumilio.annotation.txt > tmp
+mv tmp pumilio.annotation.txt

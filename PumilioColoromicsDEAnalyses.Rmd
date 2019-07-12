@@ -1,0 +1,630 @@
+---
+title: "PumilioColoromicsDEAnalyses"
+author: "Adam Stuckert"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document: default
+  pdf_document: default
+---
+
+### Setup
+
+```{r global_options, include=FALSE}
+# load packages required for analyses
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+library(tximport)
+library(DESeq2)
+library(dplyr)
+library(foreach)
+library(data.table)
+library(splines)
+library(ggthemes)
+library(scales)
+library(gridExtra)
+library(tidyr)
+library(pheatmap)
+library(RColorBrewer)
+library(ggplot2)
+library("BiocParallel")
+register(SnowParam(8))
+library(apeglm)
+library(tidyverse)
+library(topGO)
+library(GO.db)
+```
+
+Some functions I wrote for this script.
+
+```{r adam's fancy functions}
+
+# this first function runs a Walds test between specified groups, then returns a dataframe from it.
+getDEdf <- function(dds, treatment, group1, group2){
+  res <- results(dds, contrast = c(treatment, group1, group2))
+  res.df <- setDT(as.data.frame(res), keep.rownames = "Entry_name")
+  return(res.df)
+}
+
+# this function pulls out particular a priori genes of interest into a new data frame
+aprioris <- function(df, annos){
+  df <- dplyr::left_join(df, annos, by = "Entry_name")
+  df.aprioris <- df %>% filter(Gene_name %in% colors$gene_name )
+  return(df.aprioris)
+}
+
+# this function extracts all genes below a specified alpha value, prints the number of DE genes to screen, and saves a spreadsheet to file
+siggies <- function(df, alpha, csv){
+  sigs <- df %>% filter(padj < alpha)
+  print(paste0("Number of significant genes: ", length(sigs$padj)))
+  write.csv(sigs, csv, row.names = FALSE)
+  return(sigs)
+}
+```
+
+Print R environment information:
+
+```{R session info}
+sessionInfo()
+```
+
+### Data import
+
+Create sample spreadsheet.
+
+```{r create spreadsheet}
+#################### List all samples from expression data ###############
+# get the directory/path for each sample in this study
+base_dir <- getwd()
+# get directories
+dirs <- list.dirs(path = "preliminary_salmon_quantification", full.names = F, recursive = F)
+# append full file path to each sample id
+files <- file.path(base_dir, "preliminary_salmon_quantification", dirs, "quant.sf") # files = directory + salmon directory + sample name + quantifictaion file name
+names(files) <- dirs
+all(file.exists(files)) # do these all actually exist?
+
+#################### Make sample spreadsheet ###############
+samples <- as.data.frame(dirs)
+samples$sample <- dirs
+samples <- samples[,c(2,1)]
+
+# remove extra bits from sample ID
+samples$sample <- gsub(pattern = "_S.*$", replacement = "", samples$sample)
+
+# create age class
+samples$age.class <- samples$sample
+samples$age.class <- gsub(pattern = "AD.*$", replacement = "adult", samples$age.class)
+samples$age.class <- gsub(pattern = "GS.*$", replacement = "tadpole", samples$age.class)
+
+# create a bigger age class one for plotting
+samples$full.age.class <- samples$sample
+samples$full.age.class <- gsub(pattern = "AD.*$", replacement = "adult", samples$full.age.class)
+samples$full.age.class <- gsub(pattern = "_.*$", replacement = "", samples$full.age.class)
+
+# create Gosner stage
+samples$gosner.stage <- samples$sample
+samples$gosner.stage <- gsub(pattern = "AD.*$", replacement = "", samples$gosner.stage)
+samples$gosner.stage <- gsub(pattern = "_.*$", replacement = "", samples$gosner.stage)
+samples$gosner.stage <- gsub(pattern = "GS", replacement = "", samples$gosner.stage)
+
+# create sampling locality
+samples$location <- samples$sample
+samples$location <- gsub(pattern = "^.*_D.*$", replacement = "dorsum", samples$location)
+samples$location <- gsub(pattern = "^.*_V.*$", replacement = "venter", samples$location)
+
+# save as spreadsheet
+dir.create("results")
+write.csv(samples, "results/samplespreadsheet.csv", row.names = F)
+
+```
+
+Import expression data.
+
+```{r import expression data}
+#################### Import annotation documents ###############
+annos <- fread("annotation_documents/pumilio.annotation.txt", header = FALSE)
+
+# rename columns from annos file
+annos <- annos[,c(1,3)]
+colnames(annos) <- c("transcript", "Entry")
+
+# import gene names
+genes <- fread("annotation_documents/uniprot-reviewed_yes.tab", header = TRUE)
+
+tx2annos <- dplyr::left_join(annos, genes, by = "Entry")
+#subset out only tx and protein id columns
+tx2gene <- tx2annos[,c(1,3)]
+colnames(tx2gene)[2] <- "Entry_name"
+tx2gene$Entry_name <- gsub(pattern = "_.*$", replacement = "", tx2gene$Entry_name)
+
+
+#################### Import expression data ###############
+# drop any nas for importing
+tx2genenoNA <- drop_na(tx2gene)
+
+# import data via tximport
+txi <- tximport(files, type="salmon", tx2gene=tx2genenoNA)
+names(txi)
+
+counts <- txi$counts
+```
+
+Import color data
+
+```{r import color data}
+# Import a priori candidate color gene database
+colors <- read.csv("supplemental_documents/color_genes.csv")
+colnames(colors)[1] <- "gene_name"
+
+# make annotation frame to merge
+tx2annos2 <- tx2annos[c(3,6)]
+colnames(tx2annos2) <- c("Entry_name","Gene_name")
+tx2annos2$Entry_name <- gsub(pattern = "_.*$", replacement = "", tx2annos2$Entry_name)
+tx2annos2$Gene_name <- gsub(pattern = "\\s.*$", replacement = "", tx2annos2$Gene_name)
+tx2annos2$Gene_name <- tolower(tx2annos2$Gene_name)
+# remove duplicate rows
+tx2annos2 <- tx2annos2[!duplicated(tx2annos2),]
+```
+
+
+### DESeq data creation 
+
+```{r DESEQ creation}
+# create DESeq dataset
+ddsTC <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ 1)
+
+# filter out low expression contigs
+keep <- rowSums(counts(ddsTC)) >= 10
+ddsTC <- ddsTC[keep,]
+
+
+dds <- DESeq(ddsTC, parallel=TRUE, BPPARAM=SnowParam(8))
+res <- results(dds, parallel=TRUE, BPPARAM=SnowParam(8))
+```
+
+### Create a PCA
+
+```{R PCA}
+vsd <- vst(ddsTC, blind = FALSE)
+
+# get PC1 and PC2 data
+pcaData <- plotPCA(vsd, intgroup = c("full.age.class", "location"), returnData = TRUE)
+
+# get percent variation
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+# pca code
+ggplot(pcaData, aes(x = PC1, y = PC2, color = full.age.class, shape = location)) +
+  stat_ellipse(aes(group = full.age.class), type = "t", level = 0.95, size = 1.25, show.legend = FALSE) + geom_point(size = 3, show.legend = TRUE) + 
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed() + theme_bw() +
+  guides(color = guide_legend(title = "Age (weeks)", override.aes = list(linetype = 0), order = 2), shape = guide_legend(override.aes = list(linetype = 0), order = 1)) 
+  #annotate("text", label = "Ranitomeya variabilis", x = 10, y = -35, size = 4, colour = "black", fontface = "italic") +
+  #annotate("text", label = "Ranitomeya fantastica", x = -18, y = 33, size = 4, colour = "black", fontface = "italic") 
+
+# using stat_ellipse(type = "norm") will account for the few individuals outside of the prototypical fant distribution
+
+# save
+dir.create("figures")
+#ggsave("figures/MultispeciesPCA.pdf", width = 7.63, height = 7.63, dpi = 400)
+ggsave("figures/pumilioPCA.png", width = 8, height = 4.6, dpi = 600)
+```
+
+### Adult analyses
+
+Import data
+
+```{r import adult data}
+adultsamples <- samples %>% filter(age.class == "adult")
+rownames(adultsamples) <- adultsamples$sample
+adultfiles <- file.path(base_dir, "preliminary_salmon_quantification", adultsamples$dirs, "quant.sf")
+names(adultfiles) <- paste0(adultsamples$sample)
+
+#################### Import expression data ###############
+# import data via tximport
+txiadult <- tximport(adultfiles, type="salmon", tx2gene=tx2genenoNA)
+names(txiadult)
+
+adultcounts <- txiadult$counts
+```
+
+### Adult Walds tests
+
+Run differential expression analysis. What is the effect of color patch in adults?
+
+```{r Walds test adults}
+ddsadult <- DESeqDataSetFromTximport(txiadult, colData = adultsamples, design = ~ location)
+ddsadult <- DESeq(ddsadult, parallel=TRUE, BPPARAM=SnowParam(8))
+
+# walds test between colors
+resultsNames(ddsadult)
+res.adult <- getDEdf(ddsadult, "location","dorsum","venter")
+
+
+# how many are "significant"?
+res.adult.siggies <- siggies(res.adult, 0.05, "results/adultsignificantgenes.csv")
+
+# get df with color genes
+res.adult.colors <- aprioris(res.adult, tx2annos2)
+
+# how many are "significant"?
+res.adult.colors.siggies <- siggies(res.adult.colors, 0.05, "results/adult_significant_color_genes.csv")
+```
+
+
+### Tadpole tests
+
+Import data
+
+```{r import tadpole data}
+tadsamples <- samples %>% filter(age.class == "tadpole")
+rownames(tadsamples) <- tadsamples$sample
+tadfiles <- file.path(base_dir, "preliminary_salmon_quantification", tadsamples$dirs, "quant.sf")
+names(tadfiles) <- paste0(tadsamples$sample)
+
+#################### Import expression data ###############
+# import data via tximport
+txitad <- tximport(tadfiles, type="salmon", tx2gene=tx2genenoNA)
+names(txitad)
+
+tadcounts <- txitad$counts
+```
+
+###  Tadpole LRT test over time
+
+Run differential expression analysis. What is the effect of developmental stage in tadpoles?
+
+```{r LRT throughout development}
+ddstad <- DESeqDataSetFromTximport(txitad, colData = tadsamples, design = ~ location + gosner.stage)
+
+# filter out low expression contigs
+#keep <- rowSums(counts(ddstad)) >= 10
+#ddstad <- ddstad[keep,]
+
+# run LRT test
+ddstad <- DESeq(ddstad, test="LRT", reduced = ~ location, parallel=TRUE, BPPARAM=SnowParam(8))
+restad <- results(ddstad, parallel=TRUE, BPPARAM=SnowParam(8))
+restad$symbol <- mcols(restad)$symbol
+
+# how many are "significant"?
+print("Number of significant genes over time in tadpoles: ")
+table(restad[,"padj"] < 0.05)
+
+
+# write to a dataframe and add annotation data
+res.tad.df <- setDT(as.data.frame(restad), keep.rownames = "Entry_name")
+res.tad.df <- dplyr::left_join(res.tad.df, tx2annos2, by = "Entry_name")
+
+## How many color genes are differentially expressed?
+res.tad.colors <- res.tad.df %>% filter(Gene_name %in% colors$gene_name ) 
+
+# print number of significant color genes
+print("Number of significant a priori candidate color genes over time in tadpoles: ")
+table(res.tad.colors[,"padj"] < 0.05)
+
+# subset out sig color genes
+res.tad.colors.sig <- res.tad.colors %>% filter(padj < 0.05)
+
+# save to file
+write.csv(res.tad.colors.sig, "tad_significant_color_genes.csv")
+```
+
+
+### Walds tests per time point
+
+I will examine each time point and compare dorsal to venter.
+
+What are the possible comparisons?
+
+```{r tadpole comparisons?}
+resultsNames(ddstad)
+```
+
+
+```{r GS26-dorsum to venter comparisons}
+# first make a column that is each time point by location
+tadsamples$time.location <- paste0(tadsamples$full.age.class, "_", tadsamples$location)
+
+ddstad2 <- DESeqDataSetFromTximport(txitad, colData = tadsamples, design = ~ time.location)
+ddstad2 <- DESeq(ddstad2, parallel=TRUE, BPPARAM=SnowParam(8))
+
+
+# walds test between locations
+resultsNames(ddstad2)
+restad26 <- getDEdf(ddstad2, "time.location","GS26_venter","GS26_dorsum")
+tad26siggies <- siggies(restad26, 0.05, "results/tad26significantgenes.csv")
+tad26colors <- aprioris(restad26, tx2annos2)
+tad26sigcolors <- siggies(tad26colors, 0.05, "results/tad26significantcolors.csv")
+```
+
+Now run Gosner stage 37.
+
+```{r GS37-dorsum to venter comparisons}
+ddstad2$time.location <- factor(ddstad2$time.location, levels = c("GS37_dorsum", "GS37_venter", "GS42_dorsum", "GS42_venter", "GS46_dorsum", "GS46_venter", "GS26_dorsum", "GS26_venter"))
+ddstad2 <- DESeq(ddstad2, parallel=TRUE, BPPARAM=SnowParam(8))
+
+
+restad37 <- getDEdf(ddstad2, "time.location","GS37_venter","GS37_dorsum")
+tad37siggies <- siggies(restad37, 0.05, "results/tad37significantgenes.csv")
+tad37colors <- aprioris(restad37, tx2annos2)
+tad37sigcolors <- siggies(tad37colors, 0.05, "results/tad37significantcolors.csv")
+```
+
+Now run Gosner stage 42.
+
+```{r GS42-dorsum to venter comparisons}
+ddstad2$time.location <- factor(ddstad2$time.location, levels = c("GS42_dorsum", "GS42_venter", "GS46_dorsum", "GS46_venter", "GS26_dorsum", "GS26_venter", "GS37_dorsum", "GS37_venter"))
+ddstad2 <- DESeq(ddstad2, parallel=TRUE, BPPARAM=SnowParam(8))
+
+
+restad42 <- getDEdf(ddstad2, "time.location","GS42_venter","GS42_dorsum")
+tad42siggies <- siggies(restad26, 0.05, "results/tad42significantgenes.csv")
+tad42colors <- aprioris(restad42, tx2annos2)
+tad42sigcolors <- siggies(tad42colors, 0.05, "results/tad42significantcolors.csv")
+```
+
+
+Now run Gosner stage 46.
+
+
+```{r}
+ddstad2$time.location <- factor(ddstad2$time.location, levels = c("GS46_dorsum", "GS46_venter", "GS26_dorsum", "GS26_venter", "GS37_dorsum", "GS37_venter", "GS42_dorsum", "GS42_venter"))
+ddstad2 <- DESeq(ddstad2, parallel=TRUE, BPPARAM=SnowParam(8))
+
+restad46 <- getDEdf(ddstad2, "time.location","GS46_venter","GS46_dorsum")
+tad46siggies <- siggies(restad46, 0.05, "results/tad46significantgenes.csv")
+tad46colors <- aprioris(restad46, tx2annos2)
+tad46sigcolors <- siggies(tad46colors, 0.05, "results/tad46significantcolors.csv")
+```
+
+#### Time to make gene figures!
+
+Define aesthetic.
+
+```{r facet aes}
+mytheme <- theme_classic() + theme(axis.text=element_text(size=20), 
+        axis.title=element_text(size=22,face="bold"), 
+        plot.title = element_text(size = 22, hjust = 0.5), strip.text.x = element_text(size = 22),
+        panel.border = element_rect(color = "black", fill = NA, size = 1), legend.position = "none")
+```
+
+Define plotting functions
+
+```{R adam's fancy plotting functions}
+# genes = list of genes
+# dds = deseq2 object
+# annos = transcript 2 gene name df
+extractCounts <- function(genes, dds, annos){
+  gene2tx <- annos[annos$Gene_name %in% genes, ]
+
+#### for loop to extract counts
+# make empty data frame
+countdf <- data.frame()
+for (i in 1:nrow(gene2tx)){
+  target <- gene2tx[i,1]
+  gene <- gene2tx[i,2]
+  # pull out count data
+  tmp <- plotCounts(dds, gene = target, intgroup = c("full.age.class","location"), returnData = TRUE, xlab="treatment")
+  # make rownames a column
+  tmp <- setDT(tmp, keep.rownames = TRUE)
+  # add gene name to a column
+  tmp$Gene_name <- gene
+  # add all to a data frame
+  countdf <- rbind(countdf, tmp)
+  }
+
+  return(countdf)
+}
+
+# df = dataframe of genes to plot (output from countdf function)
+plotGenes <- function(df, dir){
+  dir.create(dir)
+  figs <- unique(df$Gene_name)
+
+for (i in 1:length(figs)){
+  gene <- figs[i]
+  gene_df <- df[df$Gene_name %in% gene, ]
+    #times <- tx2annos2[tx2annos2$Gene_name %in% time_genes, ]
+
+ggplot(gene_df,  aes(x = location, y = count)) + 
+  ggtitle(gene,  subtitle = "")  + 
+  ylab("Normalized Counts") + 
+  geom_boxplot(outlier.shape = NA, lwd=.75, aes(fill = location)) + scale_fill_manual(values=c("green4","yellow1")) +
+  mytheme
+  
+ggsave(paste0(dir, "/", gene, ".png"), width = 5.7, height = 4.37)
+}
+}
+
+
+extractTadCounts <- function(genes, dds, annos){
+  gene2tx <- annos[annos$Gene_name %in% genes, ]
+
+#### for loop to extract counts
+# make empty data frame
+countdf <- data.frame()
+for (i in 1:nrow(gene2tx)){
+  target <- gene2tx[i,1]
+  gene <- gene2tx[i,2]
+  # pull out count data
+  tmp <- plotCounts(dds, gene = target, intgroup = c("gosner.stage","location"), returnData = TRUE, xlab="treatment")
+  # make rownames a column
+  tmp <- setDT(tmp, keep.rownames = TRUE)
+  # add gene name to a column
+  tmp$Gene_name <- gene
+  # add all to a data frame
+  countdf <- rbind(countdf, tmp)
+  }
+
+  return(countdf)
+}
+
+
+plotGenestime <- function(df, dir){
+  dir.create(dir)
+  figs <- unique(df$Gene_name)
+
+for (i in 1:length(figs)){
+  gene <- figs[i]
+  gene_df <- df[df$Gene_name %in% gene, ]
+    #times <- tx2annos2[tx2annos2$Gene_name %in% time_genes, ]
+
+ggplot(gene_df,  aes(x = gosner.stage, y = count)) + 
+  ggtitle(gene,  subtitle = "")  + 
+  ylab("Normalized Counts") + 
+  geom_boxplot(outlier.shape = NA, lwd=.75, aes(fill = location)) + 
+  scale_fill_manual(values=c("green4","yellow1")) +
+  facet_grid(. ~ location) +
+  mytheme
+  
+ggsave(paste0(dir, "/", gene, ".png"), width = 11.38, height = 4.37)
+}
+}
+
+```
+
+
+```{r try the adults...}
+# DE genes for adults are in: res.adult.colors.siggies
+adultDEgenes <- unique(res.adult.colors.siggies$Gene_name)
+adultgenesdf <- extractCounts(adultDEgenes, ddsadult, tx2annos2)
+plotGenes(adultgenesdf, "figures/adultDEcolorgenes")
+```
+
+```{r tadpole LRT figures}
+tadDEgenes <- unique(res.tad.colors.sig$Gene_name)
+tadgenesdf <- extractTadCounts(tadDEgenes, ddstad, tx2annos2)
+plotGenestime(tadgenesdf, "figures/tadDEcolorgenes")
+```
+
+
+### Adult skin GO analyses
+
+
+```{r prep gene symbol to GO id table}
+## this  preps the go table needed, from what i originally downloaded from biomart.
+# load biomart + xenopus thingies. I downloaded these from the ensembl page.
+biomart <- fread("annotation_documents/biomart_data.txt")
+biomart2 <- biomart[,c(3,5)]
+write.csv(biomart2, "annotation_documents/gene2GO.text", row.names = FALSE)
+# remove anything without a gene name...
+biomart2 <- biomart2[!(biomart2$`Gene name`==""),]
+# make all lower case
+biomart2$`Gene name` <- tolower(biomart2$`Gene name`)
+colnames(biomart2) <- c("Gene_name", "GO_term_accession")
+
+# now these need to be in the form gene_name \t goid1, goid2, goid3...
+biomart3 <- biomart2 %>% group_by(Gene_name) %>%  mutate(GO_terms = paste0(GO_term_accession, collapse = ", "))
+biomart4 <- biomart3[,c(1,3)]
+biomart4 <- biomart4[!duplicated(biomart4),]
+
+# remove header
+biomart4 <- biomart4[-1,]
+
+# save as csv
+write.table(biomart4, "annotation_documents/geneid2GO.tsv", sep = "\t", row.names = FALSE)
+```
+
+Define GO terms of interest based on pigmentation-related key words in GO term description.
+
+```{R define pigmentation GO terms}
+##  what go terms do i think relate to color???
+# get just term IDs + description
+goinfo <- biomart[,c(5,8)]
+colnames(goinfo) <- c("GO_term","GO_description")
+
+#drop duplicates
+goinfo <- goinfo[!duplicated(goinfo),]
+
+### pull out pigmentation terms independently, so I can see them
+pigment_words <- c("sepiapterin", "drosopterin", "iridophore", "chromatophore", "melanophore", "melanosome", "melanin", "eumelanin", "melanistic", "pheomelanin", "guanine crystals", "platelets", "keratin", "keratinocyte", "melanocyte", "neural crest", "xanthophore", "spermidine", "kit", "melanoblast", "albinism", "scavenger receptors", "B-carotene", "carotene", "oxygenase", "ketolase", "ketocarotenoids", "retinol", "zeaxanthin", "retina", "wnt", "carot", "pigment", "carotenoid")
+
+pigment_search_terms <- paste(pigment_words, collapse = "|")
+
+piggies <- goinfo[grepl(pigment_search_terms, goinfo[["GO_description"]], ignore.case = TRUE)]
+piggies <- piggies[!duplicated(piggies),]
+```
+
+
+
+Define function to specify which genes we select for GO analyses based on DE results.
+
+```{R function for topGO}
+# which genes do we select? Lets say those with padj < 0.05
+# For topGO this has to be a function in this format!
+topDiffGenes <- function(allScore){
+return(allScore < 0.05)
+}
+```
+
+
+Run enrichment tests in topGO.   ####### NEEDS TO BE FIXED
+
+```{R biological process enrichment test between color patches in adults}
+# load the gene symbol 2 GO terms data
+geneID2GO <- readMappings("annotation_documents/geneid2GO.tsv")
+
+adultgenesdf <- adultgenesdf[!duplicated(adultgenesdf$Entry_name),]
+adultgenesdf <- adultgenesdf[,c(8,7)]
+
+# remove all with "" in gene_name
+adultgenesdf <- adultgenesdf[!(adultgenesdf$Gene_name == ""),]
+
+# duplicate ids are an issue
+adultgenesdf <- adultgenesdf[!duplicated(adultgenesdf$Gene_name),]
+
+# NAs will throw errors in topGO. Arbitrarily change them to something else, say 0.5
+adultgenesdf <- adultgenesdf %>% replace_na(list(padj = "0.5"))
+adultgenesdf$padj <- as.numeric(adultgenesdf$padj)
+
+# write a csv with the significant genes
+#res_timeLRT_siggies <- resfantmorph_df %>% filter(padj < 0.05)
+#write.csv(res_timeLRT_siggies, "results/time_significant_genes.csv", row.names = F)
+
+# make it a numeric vector for topGO
+adulthGO <- setNames(adultgenesdf$padj, adultgenesdf$Gene_name)
+
+# now build the topGO object
+adultGOdata <- new("topGOdata", ontology = "BP", allGenes = adultGO, geneSelectionFun = topDiffGenes, annot = annFUN.gene2GO, gene2GO = geneID2GO, nodeSize = 5)
+
+# plot a graph of it
+# graph(GOdata)
+
+# run  a classical enrichment analysis by testing the over-representation of GO terms within the group of differentially expressed genes using a Kolmogorov-Smirnov test
+adultKS <- runTest(adultGOdata, algorithm = "classic", statistic = "ks")
+
+# pull out p values for each GO term
+adultdatKS <- score(adultKS)
+
+# plot the distribution of p values 
+hist(adultdatKS, 50, xlab = "p-values")
+
+# make it into a data frame
+adultdatKS_df <- data.frame(keyName=names(adultdatKS), value=adultdatKS, row.names=NULL)
+colnames(adultdatKS_df) <- c("GO_term","p_val")
+
+# how many are "significant" at p < 0.05?
+table(adultdatKS_df[,"p_val"] < 0.05)
+
+# get gene data
+geneData(adultdatKS)
+
+# make a bomb ass table
+#allRes <- GenTable(GOdata, KS = resultKS, orderBy = "weight", ranksOf = "classic", topNodes = 20)
+#allRes
+
+
+# pull out significant color GO terms...
+colorGOsadults <- adultdatKS_df[adultdatKS_df$GO_term %in% piggies$GO_term, ]
+colorGOsadults <- left_join(colorGOsadults, piggies, by = "GO_term")
+
+# what are all the other significant GO terms?
+
+```
+
+
+
+
+
+
+
+
