@@ -1,6 +1,6 @@
 ### Mapping to a scaffolded genome assembly
 
-We additionally examined gene expression using an existing genomic resource. [Rodriguez et al.](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-020-6719-5) scaffolded the Rogers et al. genome assembly. We used the predicted transcriptome from their study in our analyses.
+We additionally examined gene expression using an existing genomic resource. [Rodriguez et al.](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-020-6719-5) scaffolded the [Rogers et al. genome assembly](https://academic.oup.com/mbe/article/35/12/2913/5106668). We used the predicted transcriptome from their study in our analyses.
 
 ```
 #!/bin/bash
