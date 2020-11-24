@@ -4,40 +4,49 @@ We additionally examined gene expression using an existing genomic resource. [Ro
 
 ```
 #!/bin/bash
-#SBATCH --job-name="kallisto_quant"
-#SBATCH --output=kallisto_log.txt
+#SBATCH --job-name=salmonRod
+#SBATCH --output=SalmonRod.txt
 #SBATCH --cpus-per-task=24
 #SBATCH --open-mode=append
 #SBATCH --partition=macmanes,shared
 # echo commands to stdout
 set -x
 
-module purge
-
-conda activate base
+# activate OPR environment
+#source activate orp_v2
 
 # global variables
 DIR=$(pwd)
 TRANSCRIPTOME=$"Rodriguez_genomic_resources/SuperDuper.fasta"
+assembly=$(basename $TRANSCRIPTOME)
 
-### Kallisto quantification ###
+
+## salmon index
+salmon index -t $TRANSCRIPTOME -i $assembly.idx
+
+
+### Salmon quantification ###
 # list samples
 samples=$(ls raw_data/*R1_001.fastq.gz | sed "s/1_001.fastq.gz//g" | grep -v Undetermined)
 
-# index transcriptome
-kallisto index -i pumilioRodriguez.idx $TRANSCRIPTOME
-
-# make directories
-mkdir kallisto_quants_Rodriguez
-cd kallisto_quants_Rodriguez
-mkdir raw_data/
-for i in $samples; do mkdir $i; done
-cd ..
-
-# perform pseudo-quantification
+# do quantification
 for sample in $samples
 do
-kallisto quant -i pumilioRodriguez.idx -t 24 -o kallisto_quants_Rodriguez/$sample -b 100 \
-${sample}1_001.fastq.gz ${sample}2_001.fastq.gz
+echo quantifying $sample
+salmon quant -i $assembly.idx  \
+        --no-version-check --seqBias --gcBias -l a \
+         -1 ${sample}1_001.fastq.gz \
+         -2 ${sample}2_001.fastq.gz \
+         -p 24 -o quants/${sample}
+
+
 done
+
+# what is the mapping rate?
+for sample in $samples
+do
+rate=$(grep "Mapping rate" ${DIR}/quants/${sample}/logs/salmon_quant.log | cut -d "=" -f 2 | sed "s/\s//g")
+printf '%s \t %s \n' "$sample" "$rate" >> ${DIR}/quants/Rodriguezmappingrates.txt
+done
+
 ```
