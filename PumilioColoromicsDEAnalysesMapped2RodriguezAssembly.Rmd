@@ -22,13 +22,11 @@ library(gridExtra)
 library(ggplot2)
 library("BiocParallel")
 register(SnowParam(1))
+library(apeglm)
 library(tidyverse)
+dir.create("resultsRodriguezAssembly")
 library(topGO)
 library(GO.db)
-library(cowplot)
-dir.create("figures")
-dir.create("figures4MS")
-dir.create("results")
 ```
 
 Some functions I wrote for this script.
@@ -81,9 +79,9 @@ Create sample spreadsheet.
 # get the directory/path for each sample in this study
 base_dir <- getwd()
 # get directories
-dirs <- list.dirs(path = "data/ORP_salmon_quantification", full.names = F, recursive = F)
+dirs <- list.dirs(path = "data/Rodriguez_salmon_quantification", full.names = F, recursive = F)
 # append full file path to each sample id
-files <- file.path(base_dir, "data/ORP_salmon_quantification", dirs, "quant.sf") # files = directory + salmon directory + sample name + quantifictaion file name
+files <- file.path(base_dir, "data/Rodriguez_salmon_quantification", dirs, "quant.sf") # files = directory + salmon directory + sample name + quantifictaion file name
 names(files) <- dirs
 all(file.exists(files)) # do these all actually exist?
 
@@ -126,7 +124,7 @@ Import expression data.
 
 ```{r import expression data}
 #################### Import annotation documents ###############
-annos <- fread("annotation_documents/pumilio.annotation.txt", header = FALSE)
+annos <- fread("annotation_documents/pumilio.annotation.Rod.txt", header = FALSE)
 
 # rename columns from annos file
 annos <- annos[,c(1,3)]
@@ -171,7 +169,7 @@ tx2annos2$Gene_name <- tolower(tx2annos2$Gene_name)
 # remove duplicate rows
 tx2annos2 <- tx2annos2[!duplicated(tx2annos2),]
 # save annotation file...
-write.csv(tx2annos, "results/Pumilio_transcript2GeneName.csv", row.names = FALSE)
+write.csv(tx2annos, "resultsRodriguezAssembly/Pumilio_transcript2GeneName.csv", row.names = FALSE)
 ```
 
 ### DESeq data creation
@@ -220,8 +218,9 @@ ggplot(pcaData, aes(x = PC1, y = PC2, color = age4plot, shape = location)) +
 
 
 # save
+dir.create("figures")
 #ggsave("figures/MultispeciesPCA.pdf", width = 7.63, height = 7.63, dpi = 400)
-ggsave("figures4MS/pumilioPCA.png", width = 8, height = 4.6, dpi = 600)
+ggsave("figures/pumilioPCA.png", width = 8, height = 4.6, dpi = 600)
 ```
 
 ### Adult analyses
@@ -231,7 +230,7 @@ Import data
 ```{r import adult data}
 adultsamples <- samples %>% filter(age.class == "adult")
 rownames(adultsamples) <- adultsamples$sample
-adultfiles <- file.path(base_dir, "data/ORP_salmon_quantification", adultsamples$dirs, "quant.sf")
+adultfiles <- file.path(base_dir, "data/Rodriguez_salmon_quantification/", adultsamples$dirs, "quant.sf")
 names(adultfiles) <- paste0(adultsamples$sample)
 
 #################### Import expression data ###############
@@ -257,13 +256,13 @@ resultsNames(ddsadult)
 res.adult <- getLFCdf(ddsadult, "location", "dorsum", "venter")
 
 # how many are "significant"?
-res.adult.siggies <- siggies(res.adult, 0.05, "results/adultsignificantgenes.csv")
+res.adult.siggies <- siggies(res.adult, 0.05, "resultsRodriguezAssembly/adultsignificantgenes.csv")
 
 # get df with color genes
 res.adult.colors <- aprioris(res.adult, tx2annos2)
 
 # how many are "significant"?
-res.adult.colors.siggies <- siggies(res.adult.colors, 0.05, "results/adult_significant_color_genes.csv")
+res.adult.colors.siggies <- siggies(res.adult.colors, 0.05, "resultsRodriguezAssembly/adult_significant_color_genes.csv")
 ```
 
 ### Tadpole tests
@@ -273,7 +272,7 @@ Import data
 ```{r import tadpole data}
 tadsamples <- samples %>% filter(age.class == "tadpole")
 rownames(tadsamples) <- tadsamples$sample
-tadfiles <- file.path(base_dir, "data/ORP_salmon_quantification", tadsamples$dirs, "quant.sf")
+tadfiles <- file.path(base_dir, "data/Rodriguez_salmon_quantification/", tadsamples$dirs, "quant.sf")
 names(tadfiles) <- paste0(tadsamples$sample)
 
 #################### Import expression data ###############
@@ -348,9 +347,9 @@ resultsNames(ddstad2)
 
 #restad26 <- getDEdf(ddstad2, "time.location","GS26_dorsum","GS26_venter")
 restad26 <- getLFCdf(ddstad2, "time.location","GS26_dorsum","GS26_venter")
-tad26siggies <- siggies(restad26, 0.05, "results/tad26significantgenes.csv")
+tad26siggies <- siggies(restad26, 0.05, "resultsRodriguezAssembly/tad26significantgenes.csv")
 tad26colors <- aprioris(restad26, tx2annos2)
-tad26sigcolors <- siggies(tad26colors, 0.05, "results/tad26significantcolors.csv")
+tad26sigcolors <- siggies(tad26colors, 0.05, "resultsRodriguezAssembly/tad26significantcolors.csv")
 ```
 
 Now run Gosner stage 37.
@@ -361,9 +360,9 @@ ddstad2 <- DESeq(ddstad2)
 
 
 restad37 <- getLFCdf(ddstad2, "time.location","GS37_dorsum","GS37_venter")
-tad37siggies <- siggies(restad37, 0.05, "results/tad37significantgenes.csv")
+tad37siggies <- siggies(restad37, 0.05, "resultsRodriguezAssembly/tad37significantgenes.csv")
 tad37colors <- aprioris(restad37, tx2annos2)
-tad37sigcolors <- siggies(tad37colors, 0.05, "results/tad37significantcolors.csv")
+tad37sigcolors <- siggies(tad37colors, 0.05, "resultsRodriguezAssembly/tad37significantcolors.csv")
 ```
 
 Now run Gosner stage 42.
@@ -374,9 +373,9 @@ ddstad2 <- DESeq(ddstad2)
 
 
 restad42 <- getLFCdf(ddstad2, "time.location","GS42_dorsum","GS42_venter")
-tad42siggies <- siggies(restad42, 0.05, "results/tad42significantgenes.csv")
+tad42siggies <- siggies(restad42, 0.05, "resultsRodriguezAssembly/tad42significantgenes.csv")
 tad42colors <- aprioris(restad42, tx2annos2)
-tad42sigcolors <- siggies(tad42colors, 0.05, "results/tad42significantcolors.csv")
+tad42sigcolors <- siggies(tad42colors, 0.05, "resultsRodriguezAssembly/tad42significantcolors.csv")
 ```
 
 Now run Gosner stage 46.
@@ -386,9 +385,9 @@ ddstad2$time.location <- factor(ddstad2$time.location, levels = c("GS46_dorsum",
 ddstad2 <- DESeq(ddstad2)
 
 restad46 <- getLFCdf(ddstad2, "time.location","GS46_dorsum","GS46_venter")
-tad46siggies <- siggies(restad46, 0.05, "results/tad46significantgenes.csv")
+tad46siggies <- siggies(restad46, 0.05, "resultsRodriguezAssembly/tad46significantgenes.csv")
 tad46colors <- aprioris(restad46, tx2annos2)
-tad46sigcolors <- siggies(tad46colors, 0.05, "results/tad46significantcolors.csv")
+tad46sigcolors <- siggies(tad46colors, 0.05, "resultsRodriguezAssembly/tad46significantcolors.csv")
 ```
 
 Which genes are differentially expressed between color patches at any time point?
@@ -424,7 +423,7 @@ allDEskinpatches <- left_join(allDEskinpatches, tx2annos2, by = "Entry_name")
 allDEskinpatches <- allDEskinpatches[,c(7,1:6)]
 
 # save to disk 
-write.csv(allDEskinpatches, "results/AllDorsumVSVentersignificantgenes.csv")
+write.csv(allDEskinpatches, "resultsRodriguezAssembly/AllDorsumVSVentersignificantgenes.csv")
 
 # print to screen #
 print(paste0("Total number of DE genes between dorsum and venter at any time point: ", length(allDEskinpatches$Gene_name)))
@@ -433,7 +432,7 @@ print(paste0("Total number of DE genes between dorsum and venter at any time poi
 allDEskinpatchescolorgenes <- allDEskinpatches %>% filter(Gene_name %in% colors$gene_name )
 
 # save to disk 
-write.csv(allDEskinpatchescolorgenes, "results/AllDorsumVSVentersignificantColorgenes.csv", row.names = FALSE)
+write.csv(allDEskinpatchescolorgenes, "resultsRodriguezAssembly/AllDorsumVSVentersignificantColorgenes.csv", row.names = FALSE)
 
 # print to screen #
 print(paste0("Total number of a priori color genes DE between dorsum and venter at any time point: ", length(allDEskinpatchescolorgenes$Gene_name)))
@@ -565,177 +564,4 @@ tadgenesdf <- extractTadCounts(tadDEgenes, ddstad, tx2annos2)
 plotGenestime(tadgenesdf, "figures/tadDEcolorgenes")
 ```
 
-### Note: I may want to add some figures for particular genes that are across development into adulthood (e.g., those 6 genes DE at every time point between dorsum and venter).
-
-Make some figures for the manuscript itself.
-
-```{R gene plotting functions for manuscript}
-
-extractCountsMS <- function(genes, dds, annos){
-  gene2tx <- annos[annos$Gene_name %in% genes, ]
-
-#### for loop to extract counts
-# make empty data frame
-countdf <- data.frame()
-for (i in 1:nrow(gene2tx)){
-  target <- as.character(gene2tx[i,1])
-  gene <- as.character(gene2tx[i,2])
-  # pull out count data
-  tmp <- plotCounts(dds, gene = target, intgroup = c("full.age.class","location"), returnData = TRUE, xlab="treatment")
-  # make rownames a column
-  tmp <- setDT(tmp, keep.rownames = TRUE)
-  # add gene name to a column
-  tmp$Gene_name <- gene
-  # add all to a data frame
-  countdf <- rbind(countdf, tmp)
-  }
-
-  return(countdf)
-}
-
-plotGenesMS <- function(df){
-  
-  # relevel age
-df$full.age.class <- as.factor(df$full.age.class)
-df$full.age.class <- factor(df$full.age.class, levels = c("GS26",  "GS37",  "GS42",  "GS46", "adult"))
-
-# create new variable for plotting...
-df$ageloc <- paste(df$full.age.class, df$location)
-
-plotout <-   ggplot(df,  aes(x = full.age.class, y = count, group = ageloc)) + 
-  ggtitle(df$Gene_name)  + 
-  ylab("Normalized Counts") + xlab("Age") +
-  geom_boxplot(outlier.shape = NA, lwd=.75, aes(fill = location), alpha = 0.75) + 
-  geom_point(position = position_dodge(width = 0.75)) +
-  scale_fill_manual(values=c("green4","yellow1")) +
-  mytheme
-  
-  return(plotout)
-}
-
-```
-
-I'll start with some melanin synthesis and melanophore genes.
-
-```{r test plotting}
-
-testgenes <- c("tyr")
-testdf <- extractCountsMS(testgenes, ddsTC, tx2annos2)
-
-# relevel age
-testdf$full.age.class <- as.factor(testdf$full.age.class)
-testdf$full.age.class <- factor(testdf$full.age.class, levels = c("GS26",  "GS37",  "GS42",  "GS46", "adult"))
-
-# create new variable for plotting...
-testdf$ageloc <- paste(testdf$full.age.class, testdf$location)
-
-gene = "tyr"
-
-ggplot(testdf,  aes(x = full.age.class, y = count, group = ageloc)) + 
-  ggtitle(testdf$Gene_name)  + 
-  ylab("Normalized Counts") + xlab("Age") +
-  geom_boxplot(outlier.shape = NA, lwd=.75, aes(fill = location), alpha = 0.75) + 
-  geom_point(position = position_dodge(width = 0.75)) +
-  scale_fill_manual(values=c("green4","yellow1")) +
-  mytheme
-
-
-testfig <- plotGenesMS(testdf, testfig)
-```
-
-```{r ms graphing function}
-
-
-
-```
-
-Make a melanin graph
-
-```{r melanin graph}
-
-# add mlph and mreg?
-
-asip <- extractCountsMS("asip", ddsTC, tx2annos2)
-asipfig <- plotGenesMS(asip)
-
-kit <- extractCountsMS("kit", ddsTC, tx2annos2)
-kitfig <- plotGenesMS(kit)
-
-lef1 <- extractCountsMS("lef1", ddsTC, tx2annos2)
-lef1fig <- plotGenesMS(lef1)
-
-mc1r <- extractCountsMS("mc1r", ddsTC, tx2annos2)
-mc1rfig <- plotGenesMS(mc1r)
-
-
-
-
-tyr <- extractCountsMS("tyr", ddsTC, tx2annos2)
-tyrfig <- plotGenesMS(tyr)
-
-
-tyrp1 <- extractCountsMS("tyrp1", ddsTC, tx2annos2)
-tyrp1fig <- plotGenesMS(tyrp1)
-
-
-plot_grid(asipfig, kitfig, lef1fig, mc1rfig, tyrfig, tyrp1fig, ncol = 2, nrow = 3)
-```
-
-Carotenoid genes:
-
-```{R carotenoid genes + xdh}
-
-# adh1,  aldh1a2, rdh10
-
-adh1 <- extractCountsMS("adh1", ddsTC, tx2annos2)
-adh1fig <- plotGenesMS(adh1)
-
-#adh2 <- extractCountsMS("adh2", ddsTC, tx2annos2)
-#adh2fig <- plotGenesMS(adh2)
-
-aldh1a2 <- extractCountsMS("aldh1a2", ddsTC, tx2annos2)
-aldh1a2fig <- plotGenesMS(aldh1a2)
-
-rdh10 <- extractCountsMS("rdh10", ddsTC, tx2annos2)
-rdh10fig <- plotGenesMS(rdh10)
-
-xdh <- extractCountsMS("xdh", ddsTC, tx2annos2)
-xdhfig <- plotGenesMS(xdh)
-
-# multipanel plot
-plot_grid(adh1fig,  aldh1a2fig, rdh10fig, xdhfig, ncol = 2, nrow = 2)
-
-```
-
-Genes DE at every age.
-
-```{R Genes DE at every age}
-
-# casq1, hand2, myh8, prva, tbx3, and zic1
-
-casq1 <- extractCountsMS("casq1", ddsTC, tx2annos2)
-casq1fig <- plotGenesMS(casq1)
-
-hand2 <- extractCountsMS("hand2", ddsTC, tx2annos2)
-hand2fig <- plotGenesMS(hand2)
-
-myh8 <- extractCountsMS("myh8", ddsTC, tx2annos2)
-myh8fig <- plotGenesMS(myh8)
-
-pvalb <- extractCountsMS("pvalb", ddsTC, tx2annos2)
-pvalbfig <- plotGenesMS(pvalb)
-
-tbx3 <- extractCountsMS("tbx3", ddsTC, tx2annos2)
-tbx3fig <- plotGenesMS(tbx3)
-
-zic1 <- extractCountsMS("zic1", ddsTC, tx2annos2)
-zic1fig <- plotGenesMS(zic1)
-
-
-
-
-
-
-# multipanel plot
-plot_grid(casq1fig,  hand2fig, myh8fig, pvalbfig, tbx3fig, zic1fig, ncol = 2, nrow = 3)
-```
+### 
